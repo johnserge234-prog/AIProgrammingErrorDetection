@@ -97,71 +97,32 @@ def fast_analysis(language, error):
     error_lower = error.lower()
 
     # =====================================================
-    # MISSING SEMICOLON
+    # MISSING QUOTATION
+    # (checked first: an unclosed string often cascades into
+    # a misleading "expected ';'" error further down)
     # =====================================================
 
     if (
-        "expected ';'" in error_lower
-        or "expected ';' before" in error_lower
-        or "expected ';' at end" in error_lower
-        or "missing ';'" in error_lower
-        or "expected primary-expression before" in error_lower
+        "missing terminating" in error_lower
+        or "unclosed string" in error_lower
     ):
 
         return {
-            "type": "Syntax Error",
+            "type": "String Error",
             "explanation": (
-                "A semicolon ';' is missing from a statement. "
-                "The compiler expected the statement to end "
-                "with a semicolon."
+                "A string or character is missing its "
+                "closing quotation mark."
             ),
             "suggestion": (
-                "Add ';' at the end of the statement identified "
-                "by the compiler."
-            )
-        }
-
-    # =====================================================
-    # C++ UNDECLARED VARIABLE
-    # =====================================================
-
-    if (
-        "was not declared in this scope" in error_lower
-        or "was not declared" in error_lower
-    ):
-
-        return {
-            "type": "Variable Error",
-            "explanation": (
-                "The variable you used has not been declared, "
-                "or its name does not match the declaration."
-            ),
-            "suggestion": (
-                "Declare the variable before using it and "
-                "check that its spelling is correct."
-            )
-        }
-
-    # =====================================================
-    # JAVA CANNOT FIND SYMBOL
-    # =====================================================
-
-    if "cannot find symbol" in error_lower:
-
-        return {
-            "type": "Variable or Reference Error",
-            "explanation": (
-                "Java cannot find the variable, method, or "
-                "class referenced in your code."
-            ),
-            "suggestion": (
-                "Check the spelling and make sure the variable, "
-                "method, or class has been declared."
+                "Check the quotation marks and add the "
+                "missing closing quotation mark."
             )
         }
 
     # =====================================================
     # MISSING CLOSING BRACE
+    # (checked before semicolon: an unclosed brace often
+    # cascades into a misleading "expected ';'" error too)
     # =====================================================
 
     if (
@@ -223,23 +184,96 @@ def fast_analysis(language, error):
         }
 
     # =====================================================
-    # MISSING QUOTATION
+    # MISSING SEMICOLON
     # =====================================================
 
     if (
-        "missing terminating" in error_lower
-        or "unclosed string" in error_lower
+        "expected ';'" in error_lower
+        or "expected ';' before" in error_lower
+        or "expected ';' at end" in error_lower
+        or "missing ';'" in error_lower
+        or "expected primary-expression before" in error_lower
     ):
 
         return {
-            "type": "String Error",
+            "type": "Syntax Error",
             "explanation": (
-                "A string or character is missing its "
-                "closing quotation mark."
+                "A semicolon ';' is missing from a statement. "
+                "The compiler expected the statement to end "
+                "with a semicolon."
             ),
             "suggestion": (
-                "Check the quotation marks and add the "
-                "missing closing quotation mark."
+                "Add ';' at the end of the statement identified "
+                "by the compiler."
+            )
+        }
+
+    # =====================================================
+    # MISSING #include <iostream>
+    # (checked before the generic undeclared-variable rule,
+    # since 'cout'/'cin'/'endl' being undeclared almost
+    # always means the header is missing, not a real typo)
+    # =====================================================
+
+    if (
+        "was not declared in this scope" in error_lower
+        or "was not declared" in error_lower
+    ) and (
+        "'cout'" in error_lower
+        or "'cin'" in error_lower
+        or "'endl'" in error_lower
+        or "cout" in error_lower and "std" in error_lower
+    ):
+
+        return {
+            "type": "Missing Include",
+            "explanation": (
+                "'cout', 'cin', or 'endl' is not recognized "
+                "because the header that defines them was not "
+                "included."
+            ),
+            "suggestion": (
+                "Add '#include <iostream>' at the top of the "
+                "file, above 'using namespace std;'."
+            )
+        }
+
+    # =====================================================
+    # C++ UNDECLARED VARIABLE
+    # =====================================================
+
+    if (
+        "was not declared in this scope" in error_lower
+        or "was not declared" in error_lower
+    ):
+
+        return {
+            "type": "Variable Error",
+            "explanation": (
+                "The variable you used has not been declared, "
+                "or its name does not match the declaration."
+            ),
+            "suggestion": (
+                "Declare the variable before using it and "
+                "check that its spelling is correct."
+            )
+        }
+
+    # =====================================================
+    # JAVA CANNOT FIND SYMBOL
+    # =====================================================
+
+    if "cannot find symbol" in error_lower:
+
+        return {
+            "type": "Variable or Reference Error",
+            "explanation": (
+                "Java cannot find the variable, method, or "
+                "class referenced in your code."
+            ),
+            "suggestion": (
+                "Check the spelling and make sure the variable, "
+                "method, or class has been declared."
             )
         }
 
