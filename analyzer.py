@@ -1,4 +1,5 @@
 import os
+import re
 from groq import Groq
 
 
@@ -11,6 +12,8 @@ client = Groq(
 )
 
 MODEL_NAME = "openai/gpt-oss-120b"
+
+MAX_ERRORS = 10
 
 
 # =========================================================
@@ -89,7 +92,45 @@ def detect_language_mismatch(language, code):
 
 
 # =========================================================
-# FAST ERROR DETECTION
+# PARSE INDIVIDUAL ERRORS OUT OF RAW COMPILER OUTPUT
+# =========================================================
+
+def parse_errors(language, raw_error):
+
+    language = (language or "").strip().lower()
+    entries = []
+
+    if language == "java":
+
+        # javac format: Main.java:5: error: ';' expected
+        pattern = re.compile(
+            r'^.+\.java:(\d+):\s*error:\s*(.+)$',
+            re.MULTILINE
+        )
+
+    else:
+
+        # g++ format: Main.cpp:5:9: error: expected ';' ...
+        pattern = re.compile(
+            r'^.+\.cpp:(\d+):\d+:\s*error:\s*(.+)$',
+            re.MULTILINE
+        )
+
+    for match in pattern.finditer(raw_error):
+
+        line_number = int(match.group(1))
+        message = match.group(2).strip()
+
+        entries.append({
+            "line": line_number,
+            "message": message
+        })
+
+    return entries
+
+
+# =========================================================
+# FAST ERROR DETECTION (operates on ONE error message)
 # =========================================================
 
 def fast_analysis(language, error):
@@ -319,63 +360,15 @@ def fast_analysis(language, error):
 
 
 # =========================================================
-# MAIN ANALYZER
+# AI FALLBACK FOR A SINGLE UNRECOGNIZED ERROR
 # =========================================================
 
-def explain(language, code, compiler_error):
+def ai_explain_single(language, code, error_text):
 
-    # -----------------------------------------------------
-    # NO ERROR
-    # -----------------------------------------------------
+    error_text = error_text.strip()
 
-    if not compiler_error or not compiler_error.strip():
-
-        return {
-            "type": "No Error",
-            "explanation": "Your code is right."
-        }
-
-    # -----------------------------------------------------
-    # LANGUAGE MISMATCH
-    # -----------------------------------------------------
-
-    mismatch = detect_language_mismatch(
-        language,
-        code
-    )
-
-    if mismatch:
-
-        print("LANGUAGE MISMATCH DETECTED")
-
-        return mismatch
-
-    # -----------------------------------------------------
-    # FAST RULE-BASED ANALYSIS
-    # -----------------------------------------------------
-
-    quick_result = fast_analysis(
-        language,
-        compiler_error
-    )
-
-    if quick_result:
-
-        print("FAST ANALYSIS USED")
-
-        return quick_result
-
-    # -----------------------------------------------------
-    # ONLY UNKNOWN ERRORS GO TO GROQ
-    # -----------------------------------------------------
-
-    print("UNKNOWN ERROR")
-    print("Sending error to Groq...")
-
-    error_text = compiler_error.strip()
-
-    if len(error_text) > 2000:
-        error_text = error_text[:2000]
+    if len(error_text) > 1000:
+        error_text = error_text[:1000]
 
     source_code = code.strip()
 
@@ -415,8 +408,6 @@ SUGGESTION:
         if not os.environ.get("GROQ_API_KEY"):
             raise Exception("GROQ_API_KEY is not set in the environment.")
 
-        print("GROQ ANALYSIS STARTED")
-
         response = client.chat.completions.create(
             model=MODEL_NAME,
             messages=[
@@ -436,8 +427,6 @@ SUGGESTION:
             timeout=20
         )
 
-        print("GROQ RESPONSE RECEIVED")
-
         if not response.choices:
             raise Exception("Groq returned no response.")
 
@@ -448,62 +437,36 @@ SUGGESTION:
 
         ai_response = ai_response.strip()
 
-        print("AI RESPONSE:")
-        print(ai_response)
-
-        # -------------------------------------------------
-        # PARSE TYPE
-        # -------------------------------------------------
-
         error_type = "Programming Error"
         explanation = ai_response
         suggestion = ""
 
         if "TYPE:" in ai_response:
 
-            type_part = ai_response.split(
-                "TYPE:",
-                1
-            )[1]
+            type_part = ai_response.split("TYPE:", 1)[1]
 
             if "EXPLANATION:" in type_part:
-
                 error_type = type_part.split(
-                    "EXPLANATION:",
-                    1
+                    "EXPLANATION:", 1
                 )[0].strip()
-
-        # -------------------------------------------------
-        # PARSE EXPLANATION
-        # -------------------------------------------------
 
         if "EXPLANATION:" in ai_response:
 
             explanation_part = ai_response.split(
-                "EXPLANATION:",
-                1
+                "EXPLANATION:", 1
             )[1]
 
             if "SUGGESTION:" in explanation_part:
-
                 explanation = explanation_part.split(
-                    "SUGGESTION:",
-                    1
+                    "SUGGESTION:", 1
                 )[0].strip()
-
             else:
-
                 explanation = explanation_part.strip()
-
-        # -------------------------------------------------
-        # PARSE SUGGESTION
-        # -------------------------------------------------
 
         if "SUGGESTION:" in ai_response:
 
             suggestion = ai_response.split(
-                "SUGGESTION:",
-                1
+                "SUGGESTION:", 1
             )[1].strip()
 
         return {
@@ -527,3 +490,133 @@ SUGGESTION:
                 "to identify the problem."
             )
         }
+
+
+# =========================================================
+# MAIN ANALYZER
+# =========================================================
+
+def explain(language, code, compiler_error):
+
+    # -----------------------------------------------------
+    # NO ERROR
+    # -----------------------------------------------------
+
+    if not compiler_error or not compiler_error.strip():
+
+        return {
+            "type": "No Error",
+            "explanation": "Your code is right.",
+            "suggestion": "",
+            "errors": []
+        }
+
+    # -----------------------------------------------------
+    # LANGUAGE MISMATCH
+    # -----------------------------------------------------
+
+    mismatch = detect_language_mismatch(
+        language,
+        code
+    )
+
+    if mismatch:
+
+        print("LANGUAGE MISMATCH DETECTED")
+
+        mismatch["errors"] = []
+        return mismatch
+
+    # -----------------------------------------------------
+    # PARSE OUT EACH INDIVIDUAL ERROR + ITS LINE NUMBER
+    # -----------------------------------------------------
+
+    entries = parse_errors(language, compiler_error)
+
+    truncated = False
+
+    if not entries:
+
+        # Raw output didn't match the expected compiler format
+        # (e.g. "Java compiler could not be found", a timeout
+        # message, or an unusual error). Treat it as one
+        # line-less entry so it still gets analyzed.
+
+        entries = [{
+            "line": None,
+            "message": compiler_error.strip()
+        }]
+
+    elif len(entries) > MAX_ERRORS:
+
+        entries = entries[:MAX_ERRORS]
+        truncated = True
+
+    # -----------------------------------------------------
+    # ANALYZE EACH ERROR INDIVIDUALLY
+    # -----------------------------------------------------
+
+    results = []
+
+    for entry in entries:
+
+        quick_result = fast_analysis(language, entry["message"])
+
+        if quick_result:
+
+            print(f"FAST ANALYSIS USED (line {entry['line']})")
+
+            results.append({
+                "line": entry["line"],
+                "type": quick_result["type"],
+                "explanation": quick_result["explanation"],
+                "suggestion": quick_result["suggestion"]
+            })
+
+        else:
+
+            print(f"UNKNOWN ERROR (line {entry['line']}) — asking Groq")
+
+            ai_result = ai_explain_single(
+                language,
+                code,
+                entry["message"]
+            )
+
+            results.append({
+                "line": entry["line"],
+                "type": ai_result["type"],
+                "explanation": ai_result["explanation"],
+                "suggestion": ai_result["suggestion"]
+            })
+
+    # -----------------------------------------------------
+    # BUILD TOP-LEVEL SUMMARY (for older/simple display)
+    # -----------------------------------------------------
+
+    if len(results) == 1:
+
+        top_type = results[0]["type"]
+        top_explanation = results[0]["explanation"]
+        top_suggestion = results[0]["suggestion"]
+
+    else:
+
+        top_type = f"{len(results)} Errors Found"
+        top_explanation = (
+            "Multiple errors were found in your code. "
+            "See the list below for each one."
+        )
+        top_suggestion = ""
+
+        if truncated:
+            top_explanation += (
+                f" Showing the first {MAX_ERRORS} errors detected."
+            )
+
+    return {
+        "type": top_type,
+        "explanation": top_explanation,
+        "suggestion": top_suggestion,
+        "errors": results
+    }
