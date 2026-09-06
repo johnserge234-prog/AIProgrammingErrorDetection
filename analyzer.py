@@ -116,15 +116,35 @@ def parse_errors(language, raw_error):
             re.MULTILINE
         )
 
+    raw_entries = []
+
     for match in pattern.finditer(raw_error):
 
         line_number = int(match.group(1))
         message = match.group(2).strip()
 
-        entries.append({
+        raw_entries.append({
             "line": line_number,
             "message": message
         })
+
+    # -----------------------------------------------------
+    # DEDUPLICATE: a single real mistake (e.g. a missing
+    # brace) often makes the compiler cascade into several
+    # confusing follow-up messages. Keep only the first
+    # message reported per line so the result stays readable.
+    # -----------------------------------------------------
+
+    entries = []
+    seen_lines = set()
+
+    for entry in raw_entries:
+
+        if entry["line"] in seen_lines:
+            continue
+
+        seen_lines.add(entry["line"])
+        entries.append(entry)
 
     return entries
 
