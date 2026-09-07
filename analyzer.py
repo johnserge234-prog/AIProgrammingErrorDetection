@@ -146,6 +146,35 @@ def parse_errors(language, raw_error):
         seen_lines.add(entry["line"])
         entries.append(entry)
 
+    # -----------------------------------------------------
+    # FILTER OUT KNOWN CASCADE NOISE: after one real
+    # structural mistake (e.g. a missing brace), compilers
+    # often throw a few vague follow-up messages that aren't
+    # independent lessons on their own. Drop them — unless
+    # doing so would leave nothing at all.
+    # -----------------------------------------------------
+
+    NOISE_PHRASES = [
+        "class, interface, enum, or record expected",
+        "class, interface, or enum expected",
+        "illegal start of type",
+    ]
+
+    def is_noise(message):
+        message_lower = message.lower()
+        return any(
+            phrase in message_lower
+            for phrase in NOISE_PHRASES
+        )
+
+    filtered = [
+        entry for entry in entries
+        if not is_noise(entry["message"])
+    ]
+
+    if filtered:
+        entries = filtered
+
     return entries
 
 
@@ -245,13 +274,34 @@ def fast_analysis(language, error):
         }
 
     # =====================================================
+    # MISSING OPENING BRACE
+    # =====================================================
+
+    if (
+        "'{' expected" in error_lower
+        or "expected '{'" in error_lower
+    ):
+
+        return {
+            "type": "Bracket Error",
+            "explanation": (
+                "An opening curly brace '{' is missing — "
+                "usually right after a class or method "
+                "declaration."
+            ),
+            "suggestion": (
+                "Add '{' at the position indicated by the "
+                "compiler to begin the class or method body."
+            )
+        }
+
+    # =====================================================
     # MISSING SEMICOLON
     # =====================================================
 
     if (
         "expected ';'" in error_lower
-        or "expected ';' before" in error_lower
-        or "expected ';' at end" in error_lower
+        or "';' expected" in error_lower
         or "missing ';'" in error_lower
         or "expected primary-expression before" in error_lower
     ):
@@ -335,22 +385,6 @@ def fast_analysis(language, error):
             "suggestion": (
                 "Check the spelling and make sure the variable, "
                 "method, or class has been declared."
-            )
-        }
-
-    # =====================================================
-    # JAVA SYNTAX ERRORS
-    # =====================================================
-
-    if " ';' expected" in error_lower:
-
-        return {
-            "type": "Syntax Error",
-            "explanation": (
-                "Java expected a semicolon at this location."
-            ),
-            "suggestion": (
-                "Add ';' at the end of the statement."
             )
         }
 
