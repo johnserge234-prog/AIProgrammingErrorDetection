@@ -123,6 +123,23 @@ def parse_errors(language, raw_error):
         line_number = int(match.group(1))
         message = match.group(2).strip()
 
+        # -------------------------------------------------
+        # g++ ONLY: a missing semicolon isn't discovered
+        # until the parser reaches the START of the NEXT
+        # statement, so g++ reports it one line too late
+        # (e.g. "expected ';' before 'cout'" pointing at the
+        # cout line, when the real culprit is the line above
+        # it). Shift the reported line back by one to match
+        # where the mistake actually is.
+        # -------------------------------------------------
+
+        if (
+            language != "java"
+            and "expected ';' before" in message.lower()
+            and line_number > 1
+        ):
+            line_number -= 1
+
         raw_entries.append({
             "line": line_number,
             "message": message
