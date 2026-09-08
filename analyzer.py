@@ -131,11 +131,26 @@ def parse_errors(language, raw_error):
         # cout line, when the real culprit is the line above
         # it). Shift the reported line back by one to match
         # where the mistake actually is.
+        #
+        # Only matches when the SEMICOLON is the expected
+        # (missing) token — i.e. "expected ';' before ...".
+        # Quote-agnostic since g++ sometimes uses straight
+        # apostrophes and sometimes curly Unicode quotes.
+        # Deliberately does NOT match the opposite case,
+        # "expected primary-expression before ';'", where an
+        # extra semicolon is the actual problem.
         # -------------------------------------------------
+
+        message_lower = message.lower()
+
+        missing_semicolon_pattern = re.search(
+            r"expected\s*[\"'\u2018\u2019]?;[\"'\u2018\u2019]?\s+before",
+            message_lower
+        )
 
         if (
             language != "java"
-            and "expected ';' before" in message.lower()
+            and missing_semicolon_pattern
             and line_number > 1
         ):
             line_number -= 1
