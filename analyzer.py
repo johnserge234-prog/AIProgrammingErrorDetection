@@ -17,6 +17,32 @@ MAX_ERRORS = 10
 
 
 # =========================================================
+# SHARED PATTERN: "missing semicolon" detection
+#
+# g++ often lists several valid alternatives before naming
+# what token actually follows — e.g. "expected ',' or ';'
+# before 'cout'" — not just "expected ';' before 'cout'".
+# This matches a quoted semicolon appearing ANYWHERE between
+# "expected" and "before", so it catches those alternatives
+# too, while still correctly rejecting the opposite case
+# ("expected primary-expression before ';'", where an EXTRA
+# semicolon is the actual problem, not a missing one — there
+# the semicolon appears AFTER "before", so it won't match).
+# Used both to shift g++'s off-by-one line number back to the
+# real culprit line, and to classify the error via
+# fast_analysis(), so both stay in sync with each other.
+# =========================================================
+
+MISSING_SEMICOLON_PATTERN = re.compile(
+    r"expected\b.*?[\"'\u2018\u2019];[\"'\u2018\u2019].*?\bbefore\b"
+)
+
+
+def is_missing_semicolon_message(message_lower):
+    return bool(MISSING_SEMICOLON_PATTERN.search(message_lower))
+
+
+# =========================================================
 # LANGUAGE MISMATCH
 # =========================================================
 
@@ -126,31 +152,16 @@ def parse_errors(language, raw_error):
         # -------------------------------------------------
         # g++ ONLY: a missing semicolon isn't discovered
         # until the parser reaches the START of the NEXT
-        # statement, so g++ reports it one line too late
-        # (e.g. "expected ';' before 'cout'" pointing at the
-        # cout line, when the real culprit is the line above
-        # it). Shift the reported line back by one to match
-        # where the mistake actually is.
-        #
-        # Only matches when the SEMICOLON is the expected
-        # (missing) token — i.e. "expected ';' before ...".
-        # Quote-agnostic since g++ sometimes uses straight
-        # apostrophes and sometimes curly Unicode quotes.
-        # Deliberately does NOT match the opposite case,
-        # "expected primary-expression before ';'", where an
-        # extra semicolon is the actual problem.
+        # statement, so g++ reports it one line too late.
+        # Shift the reported line back by one to match where
+        # the mistake actually is.
         # -------------------------------------------------
 
         message_lower = message.lower()
 
-        missing_semicolon_pattern = re.search(
-            r"expected\s*[\"'\u2018\u2019]?;[\"'\u2018\u2019]?\s+before",
-            message_lower
-        )
-
         if (
             language != "java"
-            and missing_semicolon_pattern
+            and is_missing_semicolon_message(message_lower)
             and line_number > 1
         ):
             line_number -= 1
@@ -329,6 +340,8 @@ def fast_analysis(language, error):
 
     # =====================================================
     # MISSING SEMICOLON
+    # (includes g++'s "expected ',' or ';' before X" phrasing,
+    # not just the simple "expected ';' before X" case)
     # =====================================================
 
     if (
@@ -336,6 +349,7 @@ def fast_analysis(language, error):
         or "';' expected" in error_lower
         or "missing ';'" in error_lower
         or "expected primary-expression before" in error_lower
+        or is_missing_semicolon_message(error_lower)
     ):
 
         return {
