@@ -592,6 +592,173 @@ SUGGESTION:
         }
 
 
+MAX_LOGIC_ERRORS = 5
+
+
+# =========================================================
+# AI-BASED LOGIC ERROR REVIEW
+#
+# Only runs once code has already compiled successfully.
+# Logic errors (code that compiles and runs but does not do
+# what it was clearly intended to do) never produce a
+# compiler error at all, so they can't be found by parsing
+# compiler output — there's nothing to parse. Since this
+# system has no sandboxed environment to actually execute
+# submitted code against test cases, this instead asks the
+# AI to statically review the code for common beginner logic
+# mistakes, scoped specifically to sequence, selection, and
+# repetition (the thesis's stated scope) — not style,
+# performance, or advanced topics.
+# =========================================================
+
+def check_logic_errors(language, code):
+
+    source_code = code.strip()
+
+    if len(source_code) > 4000:
+        source_code = source_code[:4000]
+
+    prompt = f"""
+You are reviewing a beginner {language} program that already
+compiles successfully with no syntax errors. Your only job is to
+check for LOGIC ERRORS — mistakes where the code runs but does not
+do what it was clearly intended to do.
+
+Only consider logic errors involving basic sequence, selection
+(if/else, switch), and repetition (for, while, do-while)
+structures. Do NOT comment on style, naming, formatting,
+performance, or object-oriented/advanced topics.
+
+Common examples to check for: using = instead of == in a
+condition, off-by-one loop bounds, a loop that never terminates or
+never runs, a condition that is always true or always false,
+comparing the wrong variables, an uninitialized variable used in a
+calculation, a return value that doesn't match what the function
+is supposed to compute, or a branch that can never be reached.
+
+Student code:
+{source_code}
+
+If you find NO logic errors, respond with exactly:
+NONE
+
+If you DO find one or more logic errors, list each one using
+exactly this format, with a line containing only --- between
+multiple errors:
+
+LINE: [line number, or unknown if not tied to one specific line]
+EXPLANATION: [what is wrong and why it produces incorrect behavior]
+SUGGESTION: [a specific fix]
+"""
+
+    try:
+
+        if not os.environ.get("GROQ_API_KEY"):
+            raise Exception("GROQ_API_KEY is not set in the environment.")
+
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You review beginner C++ and Java code for "
+                        "logic errors only, limited to sequence, "
+                        "selection, and repetition structures."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0.1,
+            timeout=20
+        )
+
+        if not response.choices:
+            return []
+
+        ai_response = response.choices[0].message.content
+
+        if not ai_response:
+            return []
+
+        ai_response = ai_response.strip()
+
+        if ai_response.upper().startswith("NONE"):
+            return []
+
+        results = []
+
+        blocks = ai_response.split("---")
+
+        for block in blocks:
+
+            block = block.strip()
+
+            if not block:
+                continue
+
+            line_number = None
+            explanation = block
+            suggestion = ""
+
+            if "LINE:" in block:
+
+                line_part = block.split("LINE:", 1)[1]
+
+                if "EXPLANATION:" in line_part:
+                    line_text = line_part.split(
+                        "EXPLANATION:", 1
+                    )[0].strip()
+                else:
+                    line_text = line_part.strip()
+
+                if line_text.isdigit():
+                    line_number = int(line_text)
+
+            if "EXPLANATION:" in block:
+
+                explanation_part = block.split(
+                    "EXPLANATION:", 1
+                )[1]
+
+                if "SUGGESTION:" in explanation_part:
+                    explanation = explanation_part.split(
+                        "SUGGESTION:", 1
+                    )[0].strip()
+                else:
+                    explanation = explanation_part.strip()
+
+            if "SUGGESTION:" in block:
+
+                suggestion = block.split(
+                    "SUGGESTION:", 1
+                )[1].strip()
+
+            results.append({
+                "line": line_number,
+                "type": "Logic Error",
+                "explanation": explanation,
+                "suggestion": suggestion
+            })
+
+            if len(results) >= MAX_LOGIC_ERRORS:
+                break
+
+        return results
+
+    except Exception as e:
+
+        print("LOGIC CHECK ERROR:", e)
+
+        # Fail quietly: if the logic review itself breaks, fall
+        # back to "No Error" rather than blocking the response —
+        # the code did compile correctly, after all.
+        return []
+
+
 # =========================================================
 # MAIN ANALYZER
 # =========================================================
@@ -599,16 +766,46 @@ SUGGESTION:
 def explain(language, code, compiler_error):
 
     # -----------------------------------------------------
-    # NO ERROR
+    # NO SYNTAX ERROR — CHECK FOR LOGIC ERRORS INSTEAD
     # -----------------------------------------------------
 
     if not compiler_error or not compiler_error.strip():
 
+        print("NO SYNTAX ERROR — running AI logic review")
+
+        logic_errors = check_logic_errors(language, code)
+
+        if not logic_errors:
+
+            return {
+                "type": "No Error",
+                "explanation": "Your code is right.",
+                "suggestion": "",
+                "errors": []
+            }
+
+        print(f"LOGIC CHECK found {len(logic_errors)} issue(s)")
+
+        if len(logic_errors) == 1:
+
+            top_type = logic_errors[0]["type"]
+            top_explanation = logic_errors[0]["explanation"]
+            top_suggestion = logic_errors[0]["suggestion"]
+
+        else:
+
+            top_type = f"{len(logic_errors)} Logic Errors Found"
+            top_explanation = (
+                "Your code compiles correctly, but possible logic "
+                "errors were found. See the list below for each one."
+            )
+            top_suggestion = ""
+
         return {
-            "type": "No Error",
-            "explanation": "Your code is right.",
-            "suggestion": "",
-            "errors": []
+            "type": top_type,
+            "explanation": top_explanation,
+            "suggestion": top_suggestion,
+            "errors": logic_errors
         }
 
     # -----------------------------------------------------
