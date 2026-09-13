@@ -57,27 +57,19 @@ def analyze_code(data: CodeInput):
         data.code
     )
 
-    # ============================================
-    # NO COMPILER ERROR
-    # ============================================
-
-    if not compiler_error:
-
-        print("No compiler error.")
-
-        return {
-            "type": "No Error",
-            "explanation": "Your code is right."
-        }
+    if compiler_error:
+        print("Compiler error detected:")
+        print(compiler_error)
+    else:
+        print("No compiler error. Running logic-error review...")
 
     # ============================================
-    # COMPILER ERROR FOUND
+    # SEND TO ANALYZER
+    # (explain() handles both cases internally:
+    # if compiler_error is empty, it runs the AI
+    # logic-error check; if not, it parses and
+    # explains each compiler error)
     # ============================================
-
-    print("Compiler error detected:")
-    print(compiler_error)
-
-    print("Sending error to analyzer...")
 
     result = explain(
         data.language,

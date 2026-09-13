@@ -629,7 +629,18 @@ Only consider logic errors involving basic sequence, selection
 structures. Do NOT comment on style, naming, formatting,
 performance, or object-oriented/advanced topics.
 
-Common examples to check for: using = instead of == in a
+First, mentally trace the code with a plausible sample value (or
+the actual value already in the code, if there is one) and work
+out exactly what it would print or return. Then check: does that
+outcome match what the code's own variable names, string
+messages, and comments imply it SHOULD do? A very common beginner
+mistake is a condition that is backwards relative to its own
+labels — for example, a branch guarded by "score < 50" that
+prints "Passed", when a low score should intuitively mean
+failing. Flag this kind of semantic mismatch even though the code
+is technically self-consistent syntactically.
+
+Other common examples to check for: using = instead of == in a
 condition, off-by-one loop bounds, a loop that never terminates or
 never runs, a condition that is always true or always false,
 comparing the wrong variables, an uninitialized variable used in a
