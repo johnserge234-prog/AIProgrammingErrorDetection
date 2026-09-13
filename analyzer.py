@@ -618,6 +618,19 @@ def check_logic_errors(language, code):
     if len(source_code) > 4000:
         source_code = source_code[:4000]
 
+    # -------------------------------------------------
+    # Number each line ourselves before sending it to the
+    # model. Asking the model to silently count lines
+    # (especially across blank lines) is unreliable and
+    # was causing off-by-one line numbers in its answers.
+    # Giving it the numbers directly removes that guesswork.
+    # -------------------------------------------------
+
+    numbered_code = "\n".join(
+        f"{i + 1}: {line}"
+        for i, line in enumerate(source_code.split("\n"))
+    )
+
     prompt = f"""
 You are reviewing a beginner {language} program that already
 compiles successfully with no syntax errors. Your only job is to
@@ -647,8 +660,10 @@ comparing the wrong variables, an uninitialized variable used in a
 calculation, a return value that doesn't match what the function
 is supposed to compute, or a branch that can never be reached.
 
-Student code:
-{source_code}
+Student code (each line is prefixed with its exact line number —
+use that number directly in your LINE: field below; do not count
+lines yourself):
+{numbered_code}
 
 If you find NO logic errors, respond with exactly:
 NONE
@@ -657,7 +672,7 @@ If you DO find one or more logic errors, list each one using
 exactly this format, with a line containing only --- between
 multiple errors:
 
-LINE: [line number, or unknown if not tied to one specific line]
+LINE: [the exact line number shown above, or unknown if not tied to one specific line]
 EXPLANATION: [what is wrong and why it produces incorrect behavior]
 SUGGESTION: [a specific fix]
 """
